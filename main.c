@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include <stdlib.h>
+#include <libgen.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -817,15 +818,36 @@ void setup_signal(int sig, void (*handler)(int sig))
 		error(EXIT_FAILURE, errno, "signal %d", sig);
 }
 
+int add_files_from_dir(char *directory, char *exclude_filename, bool recursive)
+{
+	r_dir_t dir;
+	if (r_opendir(&dir, directory, recursive) < 0) {
+		error(0, errno, "%s", directory);
+		return 1;
+	}
+	int start = fileidx;
+	char *filename;
+	while ((filename = r_readdir(&dir, true)) != NULL) {
+
+		if (strcmp(filename, exclude_filename) != 0) {
+			check_add_file(filename, false);
+		}
+		free((void*) filename);
+	}
+	r_closedir(&dir);
+	if (fileidx - start > 1)
+		qsort(files + start, fileidx - start, sizeof(fileinfo_t), fncmp);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
-	int i, start;
+	int i;
 	size_t n;
 	ssize_t len;
 	char *filename;
 	const char *homedir, *dsuffix = "";
 	struct stat fstats;
-	r_dir_t dir;
 
 	setup_signal(SIGCHLD, sigchld);
 	setup_signal(SIGPIPE, SIG_IGN);
@@ -874,19 +896,14 @@ int main(int argc, char **argv)
 		}
 		if (!S_ISDIR(fstats.st_mode)) {
 			check_add_file(filename, true);
-		} else {
-			if (r_opendir(&dir, filename, options->recursive) < 0) {
-				error(0, errno, "%s", filename);
+			char *_filename = strdup(filename);
+			char *filedir = strdup(filename);
+			filedir = dirname(filename);
+			if (!add_files_from_dir(filedir, _filename, options->recursive))
 				continue;
-			}
-			start = fileidx;
-			while ((filename = r_readdir(&dir, true)) != NULL) {
-				check_add_file(filename, false);
-				free((void*) filename);
-			}
-			r_closedir(&dir);
-			if (fileidx - start > 1)
-				qsort(files + start, fileidx - start, sizeof(fileinfo_t), fncmp);
+		} else {
+			if (!add_files_from_dir(filename, "", options->recursive))
+				continue;
 		}
 	}
 
